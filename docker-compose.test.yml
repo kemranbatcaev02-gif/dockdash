@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  web-gateway:
+    image: nginx:alpine
+    container_name: web-gateway
+    ports:
+      - "8081:80"
+    restart: always
+
+  cache-store:
+    image: redis:7-alpine
+    container_name: cache-store
+    ports:
+      - "6380:6379"
+    restart: always
+
+  db-postgres:
+    image: postgres:16-alpine
+    container_name: db-postgres
+    environment:
+      POSTGRES_PASSWORD: secretpassword
+      POSTGRES_DB: appdb
+    ports:
+      - "5433:5432"
+    restart: always
+
+  traffic-generator:
+    image: busybox
+    container_name: traffic-generator
+    command: >
+      sh -c "while true; do
+        echo \"[$$(date +'%Y-%m-%d %H:%M:%S')] Processed batch job ID: $$RANDOM\";
+        sleep 2;
+      done"
+    restart: always
