@@ -79,6 +79,13 @@ var (
 	NormalRowStyle = lipgloss.NewStyle().
 			Foreground(ColorText)
 
+	// Заголовок стека проектов Docker Compose
+	ProjectHeaderStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(ColorPrimary).
+				Background(ColorHighlight).
+				Padding(0, 1)
+
 	// Статусы контейнеров с иконками
 	RunningStatus = lipgloss.NewStyle().
 			Foreground(ColorSuccess).

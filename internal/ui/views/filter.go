@@ -60,6 +60,8 @@ func (f *FilterBar) FilterContainers(containers []model.ContainerInfo) []model.C
 	for _, c := range containers {
 		if strings.Contains(strings.ToLower(c.Name), val) ||
 			strings.Contains(strings.ToLower(c.Image), val) ||
+			strings.Contains(strings.ToLower(c.ComposeProject), val) ||
+			strings.Contains(strings.ToLower(c.ComposeService), val) ||
 			strings.Contains(strings.ToLower(c.ShortID), val) {
 			filtered = append(filtered, c)
 		}

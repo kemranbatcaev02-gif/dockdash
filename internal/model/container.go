@@ -26,11 +26,13 @@ type ContainerInfo struct {
 	StateText   string          `json:"state_text"` // например: "Up 2 hours"
 	Ports       string          `json:"ports"`
 	Created     time.Time       `json:"created"`
-	CPUPercent  float64         `json:"cpu_percent"`
-	MemoryUsage uint64          `json:"memory_usage"`
-	MemoryLimit uint64          `json:"memory_limit"`
-	IsLoading   bool            `json:"is_loading"`
-	LoadingMsg  string          `json:"loading_msg"`
+	CPUPercent     float64         `json:"cpu_percent"`
+	MemoryUsage    uint64          `json:"memory_usage"`
+	MemoryLimit    uint64          `json:"memory_limit"`
+	ComposeProject string          `json:"compose_project"`
+	ComposeService string          `json:"compose_service"`
+	IsLoading      bool            `json:"is_loading"`
+	LoadingMsg     string          `json:"loading_msg"`
 }
 
 // Форматирование памяти (МБ / ГБ)

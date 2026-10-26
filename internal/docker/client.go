@@ -177,15 +177,24 @@ func (r *RealClient) ListContainers(ctx context.Context) ([]model.ContainerInfo,
 			status = model.StatusDead
 		}
 
+		composeProject := ""
+		composeService := ""
+		if c.Labels != nil {
+			composeProject = c.Labels["com.docker.compose.project"]
+			composeService = c.Labels["com.docker.compose.service"]
+		}
+
 		result = append(result, model.ContainerInfo{
-			ID:        c.ID,
-			ShortID:   shortID,
-			Name:      name,
-			Image:     c.Image,
-			Status:    status,
-			StateText: c.Status,
-			Ports:     model.FormatPorts(portStrs),
-			Created:   time.Unix(c.Created, 0),
+			ID:             c.ID,
+			ShortID:        shortID,
+			Name:           name,
+			Image:          c.Image,
+			Status:         status,
+			StateText:      c.Status,
+			Ports:          model.FormatPorts(portStrs),
+			Created:        time.Unix(c.Created, 0),
+			ComposeProject: composeProject,
+			ComposeService: composeService,
 		})
 	}
 

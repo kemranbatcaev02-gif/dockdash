@@ -213,20 +213,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Управление на экране информации (Inspect)
 		if m.activeView == ViewInspect {
-			visibleContainers := m.getVisibleContainers()
+			rows := m.getNavigableRows()
 			switch key {
 			case "esc", "backspace":
 				m.activeView = ViewList
 				m.recalcDimensions()
 				return m, nil
 			case "up", "k", "л":
-				m.listView.MoveUp(len(visibleContainers))
+				m.listView.MoveUp(len(rows))
 				if c := m.getSelectedContainer(); c != nil {
 					return m, m.inspectContainerCmd(c.ID)
 				}
 				return m, nil
 			case "down", "j", "о":
-				m.listView.MoveDown(len(visibleContainers))
+				m.listView.MoveDown(len(rows))
 				if c := m.getSelectedContainer(); c != nil {
 					return m, m.inspectContainerCmd(c.ID)
 				}
@@ -265,7 +265,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		// Управление на главном списке контейнеров
-		visibleContainers := m.getVisibleContainers()
+		navRows := m.getNavigableRows()
 
 		// Заглавная K / Л вызывает принудительное завершение (Kill)
 		if msg.String() == "K" || msg.String() == "Л" {
@@ -277,22 +277,86 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		switch key {
 		case "up", "k", "л":
-			m.listView.MoveUp(len(visibleContainers))
+			m.listView.MoveUp(len(navRows))
 
 		case "down", "j", "о":
-			m.listView.MoveDown(len(visibleContainers))
+			m.listView.MoveDown(len(navRows))
 
 		case "home":
 			m.listView.Cursor = 0
 			m.listView.Offset = 0
 
 		case "end":
-			if len(visibleContainers) > 0 {
-				m.listView.Cursor = len(visibleContainers) - 1
+			if len(navRows) > 0 {
+				m.listView.Cursor = len(navRows) - 1
 			}
 
+		case "tab": // Свернуть / развернуть стек
+			selectedRow := m.getSelectedRow()
+			if selectedRow != nil {
+				if selectedRow.Type == views.RowProjectHeader {
+					m.listView.ToggleProjectCollapse(selectedRow.ProjectName)
+					m.recalcDimensions()
+				} else if selectedRow.ProjectName != "" {
+					m.listView.ToggleProjectCollapse(selectedRow.ProjectName)
+					m.recalcDimensions()
+				}
+			}
+
+		case "g", "п": // Переключение режима группировки (Compose Stacks / Flat)
+			isGrouped := m.listView.ToggleGrouping()
+			if isGrouped {
+				m.toast = "Группировка: по стекам Docker Compose"
+			} else {
+				m.toast = "Группировка: плоский список контейнеров"
+			}
+			m.toastIsErr = false
+			cmds = append(cmds, m.clearToastCmd())
+
 		case " ": // Space: Toggle Start / Stop
-			if c := m.getSelectedContainer(); c != nil {
+			selectedRow := m.getSelectedRow()
+			if selectedRow == nil {
+				return m, nil
+			}
+			if selectedRow.Type == views.RowProjectHeader {
+				// Управление всеми контейнерами в стеке
+				projName := selectedRow.ProjectName
+				visible := m.getVisibleContainers()
+				var stackContainers []model.ContainerInfo
+				for _, c := range visible {
+					if c.ComposeProject == projName {
+						stackContainers = append(stackContainers, c)
+					}
+				}
+				if len(stackContainers) == 0 {
+					return m, nil
+				}
+
+				allStopped := (selectedRow.RunningCount == 0)
+				targetAction := model.ActionStop
+				actionName := "Остановка"
+				if allStopped {
+					targetAction = model.ActionStart
+					actionName = "Запуск"
+				}
+
+				displayName := projName
+				if displayName == "" {
+					displayName = "standalone"
+				}
+				m.toast = fmt.Sprintf("%s стека '%s' (%d контейнеров)...", actionName, displayName, len(stackContainers))
+				m.toastIsErr = false
+
+				for _, c := range stackContainers {
+					msg := "stopping..."
+					if allStopped {
+						msg = "starting..."
+					}
+					m.markLoading(c.ID, msg)
+					cmds = append(cmds, m.executeActionCmd(c.ID, c.Name, targetAction))
+				}
+				cmds = append(cmds, m.clearToastCmd())
+			} else if c := selectedRow.Container; c != nil {
 				if c.Status == model.StatusRunning {
 					m.markLoading(c.ID, "stopping...")
 					cmds = append(cmds, m.executeActionCmd(c.ID, c.Name, model.ActionStop))
@@ -303,25 +367,64 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "x", "ч", "e", "у": // Интерактивный шелл в контейнере
-			if c := m.getSelectedContainer(); c != nil {
-				if c.Status != model.StatusRunning {
-					m.toast = "⚠️ Нельзя открыть шелл в остановленном контейнере"
-					m.toastIsErr = true
-					return m, m.clearToastCmd()
-				}
-				cmd, err := m.docker.GetExecCommand(context.Background(), c.ID)
-				if err != nil {
-					m.toast = fmt.Sprintf("✖ Ошибка подготовки шелла: %v", err)
-					m.toastIsErr = true
-					return m, m.clearToastCmd()
-				}
-				return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
-					return execFinishedMsg{err: err}
-				})
+			selectedRow := m.getSelectedRow()
+			if selectedRow == nil {
+				return m, nil
 			}
+			if selectedRow.Type == views.RowProjectHeader {
+				m.toast = "⚠️ Выберите контейнер в стеке для шелла"
+				m.toastIsErr = true
+				return m, m.clearToastCmd()
+			}
+			c := selectedRow.Container
+			if c == nil {
+				return m, nil
+			}
+			if c.Status != model.StatusRunning {
+				m.toast = "⚠️ Нельзя открыть шелл в остановленном контейнере"
+				m.toastIsErr = true
+				return m, m.clearToastCmd()
+			}
+			cmd, err := m.docker.GetExecCommand(context.Background(), c.ID)
+			if err != nil {
+				m.toast = fmt.Sprintf("✖ Ошибка подготовки шелла: %v", err)
+				m.toastIsErr = true
+				return m, m.clearToastCmd()
+			}
+			return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
+				return execFinishedMsg{err: err}
+			})
 
 		case "r", "к": // Restart
-			if c := m.getSelectedContainer(); c != nil {
+			selectedRow := m.getSelectedRow()
+			if selectedRow == nil {
+				return m, nil
+			}
+			if selectedRow.Type == views.RowProjectHeader {
+				projName := selectedRow.ProjectName
+				visible := m.getVisibleContainers()
+				var stackContainers []model.ContainerInfo
+				for _, c := range visible {
+					if c.ComposeProject == projName {
+						stackContainers = append(stackContainers, c)
+					}
+				}
+				if len(stackContainers) == 0 {
+					return m, nil
+				}
+				displayName := projName
+				if displayName == "" {
+					displayName = "standalone"
+				}
+				m.toast = fmt.Sprintf("Перезапуск стека '%s' (%d контейнеров)...", displayName, len(stackContainers))
+				m.toastIsErr = false
+
+				for _, c := range stackContainers {
+					m.markLoading(c.ID, "restarting...")
+					cmds = append(cmds, m.executeActionCmd(c.ID, c.Name, model.ActionRestart))
+				}
+				cmds = append(cmds, m.clearToastCmd())
+			} else if c := selectedRow.Container; c != nil {
 				m.markLoading(c.ID, "restarting...")
 				cmds = append(cmds, m.executeActionCmd(c.ID, c.Name, model.ActionRestart))
 			}
@@ -338,15 +441,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.activeView = ViewInspect
 				m.recalcDimensions()
 				cmds = append(cmds, m.inspectContainerCmd(c.ID))
+			} else {
+				m.toast = "⚠️ Выберите контейнер для инспекции"
+				m.toastIsErr = true
+				cmds = append(cmds, m.clearToastCmd())
 			}
 
 		case "d", "в": // Delete with confirmation
 			if c := m.getSelectedContainer(); c != nil {
 				m.modal.Show(c.ID, c.Name, model.ActionRemove)
+			} else {
+				m.toast = "⚠️ Выберите контейнер для удаления"
+				m.toastIsErr = true
+				cmds = append(cmds, m.clearToastCmd())
 			}
 
-		case "enter", "l", "д": // Open Logs View
-			if c := m.getSelectedContainer(); c != nil {
+		case "enter", "l", "д": // Open Logs View or toggle stack
+			selectedRow := m.getSelectedRow()
+			if selectedRow == nil {
+				return m, nil
+			}
+			if selectedRow.Type == views.RowProjectHeader {
+				m.listView.ToggleProjectCollapse(selectedRow.ProjectName)
+				m.recalcDimensions()
+				return m, nil
+			}
+			c := selectedRow.Container
+			if c != nil {
 				m.activeView = ViewLogs
 				m.logsView.SetContainer(*c)
 				m.recalcDimensions()
@@ -534,12 +655,20 @@ func (m *Model) getVisibleContainers() []model.ContainerInfo {
 	return filtered
 }
 
+func (m *Model) getNavigableRows() []views.ListRow {
+	return m.listView.BuildVisibleRows(m.getVisibleContainers())
+}
+
+func (m *Model) getSelectedRow() *views.ListRow {
+	return m.listView.GetSelectedRow(m.getVisibleContainers())
+}
+
 func (m *Model) getSelectedContainer() *model.ContainerInfo {
-	visible := m.getVisibleContainers()
-	if len(visible) == 0 || m.listView.Cursor >= len(visible) {
+	row := m.getSelectedRow()
+	if row == nil || row.Type != views.RowContainer {
 		return nil
 	}
-	return &visible[m.listView.Cursor]
+	return row.Container
 }
 
 func (m *Model) markLoading(id, msg string) {

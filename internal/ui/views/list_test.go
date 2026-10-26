@@ -32,3 +32,49 @@ func TestNoRowWrapping(t *testing.T) {
 		}
 	}
 }
+
+func TestComposeProjectGrouping(t *testing.T) {
+	containers := []model.ContainerInfo{
+		{ID: "1", Name: "web", Status: model.StatusRunning, ComposeProject: "shop-stack", ComposeService: "web"},
+		{ID: "2", Name: "db", Status: model.StatusRunning, ComposeProject: "shop-stack", ComposeService: "db"},
+		{ID: "3", Name: "kafka", Status: model.StatusExited, ComposeProject: "data-infra", ComposeService: "kafka"},
+		{ID: "4", Name: "standalone-app", Status: model.StatusRunning, ComposeProject: ""},
+	}
+
+	v := NewContainersListView()
+	v.GroupByProject = true
+
+	// Expect 3 headers (data-infra, shop-stack, standalone) + 4 containers = 7 rows
+	rows := v.BuildVisibleRows(containers)
+	if len(rows) != 7 {
+		t.Fatalf("Expected 7 rows with grouping, got %d", len(rows))
+	}
+
+	// First row should be data-infra header (alphabetical)
+	if rows[0].Type != RowProjectHeader || rows[0].ProjectName != "data-infra" {
+		t.Fatalf("Expected first row to be data-infra header, got %+v", rows[0])
+	}
+	if rows[0].TotalCount != 1 || rows[0].RunningCount != 0 {
+		t.Fatalf("Expected data-infra (0/1), got (%d/%d)", rows[0].RunningCount, rows[0].TotalCount)
+	}
+
+	// Collapse shop-stack
+	v.ToggleProjectCollapse("shop-stack")
+	rowsCollapsed := v.BuildVisibleRows(containers)
+	// data-infra header + 1 child + shop-stack header (0 children) + standalone header + 1 child = 5 rows
+	if len(rowsCollapsed) != 5 {
+		t.Fatalf("Expected 5 rows after collapsing shop-stack, got %d", len(rowsCollapsed))
+	}
+
+	// Toggle grouping to flat
+	v.ToggleGrouping()
+	flatRows := v.BuildVisibleRows(containers)
+	if len(flatRows) != 4 {
+		t.Fatalf("Expected 4 rows in flat mode, got %d", len(flatRows))
+	}
+	for _, r := range flatRows {
+		if r.Type != RowContainer {
+			t.Fatalf("Flat mode should only contain RowContainer, found %+v", r)
+		}
+	}
+}
