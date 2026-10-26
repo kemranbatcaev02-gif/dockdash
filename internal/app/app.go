@@ -47,6 +47,7 @@ type logLineMsg string
 type statsUpdateMsg model.StatsUpdate
 type toastClearMsg struct{}
 type tickMsg time.Time
+type execFinishedMsg struct{ err error }
 
 // Главное состояние программы
 type Model struct {
@@ -157,6 +158,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toastIsErr = false
 		}
 		cmds = append(cmds, m.clearToastCmd(), m.loadContainersCmd(), m.loadDaemonInfoCmd())
+
+	case execFinishedMsg:
+		if msg.err != nil {
+			m.toast = fmt.Sprintf("✖ Ошибка шелла: %v", msg.err)
+			m.toastIsErr = true
+		} else {
+			m.toast = "✔ Сессия шелла завершена"
+			m.toastIsErr = false
+		}
+		return m, tea.Batch(tea.ClearScreen, m.loadContainersCmd(), m.clearToastCmd())
 
 	case tea.KeyMsg:
 		key := strings.ToLower(msg.String())
@@ -289,6 +300,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.markLoading(c.ID, "starting...")
 					cmds = append(cmds, m.executeActionCmd(c.ID, c.Name, model.ActionStart))
 				}
+			}
+
+		case "x", "ч", "e", "у": // Интерактивный шелл в контейнере
+			if c := m.getSelectedContainer(); c != nil {
+				if c.Status != model.StatusRunning {
+					m.toast = "⚠️ Нельзя открыть шелл в остановленном контейнере"
+					m.toastIsErr = true
+					return m, m.clearToastCmd()
+				}
+				cmd, err := m.docker.GetExecCommand(context.Background(), c.ID)
+				if err != nil {
+					m.toast = fmt.Sprintf("✖ Ошибка подготовки шелла: %v", err)
+					m.toastIsErr = true
+					return m, m.clearToastCmd()
+				}
+				return m, tea.ExecProcess(cmd, func(err error) tea.Msg {
+					return execFinishedMsg{err: err}
+				})
 			}
 
 		case "r", "к": // Restart

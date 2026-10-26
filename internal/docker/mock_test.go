@@ -121,3 +121,25 @@ func TestMockClientLifecycle(t *testing.T) {
 		}
 	}
 }
+
+func TestGetExecCommand(t *testing.T) {
+	ctx := context.Background()
+	mock := NewMockClient()
+
+	cmd, err := mock.GetExecCommand(ctx, "mock-api-gw")
+	if err != nil {
+		t.Fatalf("mock.GetExecCommand failed: %v", err)
+	}
+	if cmd == nil || len(cmd.Args) == 0 {
+		t.Fatalf("expected valid non-empty command for exec, got nil or empty")
+	}
+
+	realCli := &RealClient{}
+	realCmd, err := realCli.GetExecCommand(ctx, "test-container-id")
+	if err != nil {
+		t.Fatalf("RealClient.GetExecCommand failed: %v", err)
+	}
+	if len(realCmd.Args) < 3 || realCmd.Args[0] != "docker" || realCmd.Args[1] != "exec" || realCmd.Args[2] != "-it" {
+		t.Errorf("unexpected real exec command arguments: %v", realCmd.Args)
+	}
+}

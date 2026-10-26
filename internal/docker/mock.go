@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"os/exec"
+	"runtime"
 	"sync"
 	"time"
 
@@ -365,6 +367,26 @@ func (m *MockClient) GetStats(ctx context.Context, id string) (model.StatsUpdate
 	}
 
 	return model.StatsUpdate{}, fmt.Errorf("контейнер не найден")
+}
+
+// Возвращает интерактивную команду-симулятор для демо-режима
+func (m *MockClient) GetExecCommand(ctx context.Context, id string) (*exec.Cmd, error) {
+	name := id
+	m.mu.Lock()
+	for _, c := range m.containers {
+		if c.ID == id {
+			name = c.Name
+			break
+		}
+	}
+	m.mu.Unlock()
+
+	if runtime.GOOS == "windows" {
+		banner := fmt.Sprintf("echo [DockDash Demo Shell] Подключено к контейнеру '%s' & echo Это симуляция шелла в демо-режиме. Введите exit для возврата & cmd /k", name)
+		return exec.Command("cmd", "/c", banner), nil
+	}
+	banner := fmt.Sprintf("echo '[DockDash Demo Shell] Подключено к контейнеру %s'; echo 'Это симуляция шелла в демо-режиме. Введите exit для возврата'; sh", name)
+	return exec.Command("sh", "-c", banner), nil
 }
 
 func (m *MockClient) IsDemo() bool {

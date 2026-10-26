@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -280,6 +281,12 @@ func (r *RealClient) GetStats(ctx context.Context, id string) (model.StatsUpdate
 		MemoryUsage: memUsage,
 		MemoryLimit: stats.MemoryStats.Limit,
 	}, nil
+}
+
+// Возвращает команду для интерактивного шелла в контейнере
+func (r *RealClient) GetExecCommand(ctx context.Context, id string) (*exec.Cmd, error) {
+	cmd := exec.Command("docker", "exec", "-it", id, "sh", "-c", "if command -v bash >/dev/null 2>&1; then exec bash; else exec sh; fi")
+	return cmd, nil
 }
 
 func (r *RealClient) IsDemo() bool {

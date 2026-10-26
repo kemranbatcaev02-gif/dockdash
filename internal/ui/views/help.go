@@ -44,6 +44,7 @@ func (h HelpView) Render(activeMode string, isFiltered bool, isModal bool, isSpl
 		bindings = []KeyBinding{
 			{Key: "↑/↓", Desc: "Выбор"},
 			{Key: "Space", Desc: "Старт/Стоп"},
+			{Key: "x", Desc: "Шелл"},
 			{Key: "r", Desc: "Рестарт"},
 			{Key: "s", Desc: "Сортировка"},
 			{Key: "Enter", Desc: "Логи"},

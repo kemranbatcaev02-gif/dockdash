@@ -3,6 +3,7 @@ package docker
 import (
 	"context"
 	"io"
+	"os/exec"
 
 	"dockdash/internal/model"
 )
@@ -20,5 +21,6 @@ type Service interface {
 	RemoveContainer(ctx context.Context, id string, force bool) error
 	GetLogsStream(ctx context.Context, id string, tailLines int) (io.ReadCloser, error)
 	GetStats(ctx context.Context, id string) (model.StatsUpdate, error)
+	GetExecCommand(ctx context.Context, id string) (*exec.Cmd, error)
 	IsDemo() bool
 }
