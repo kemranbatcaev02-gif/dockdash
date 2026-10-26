@@ -97,7 +97,7 @@ func TestMockClientLifecycle(t *testing.T) {
 	streamCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
 	defer cancel()
 
-	reader, err := mock.GetLogsStream(streamCtx, target.ID, 10)
+	reader, err := mock.GetLogsStream(streamCtx, target.ID, 10, "")
 	if err != nil {
 		t.Fatalf("GetLogsStream failed: %v", err)
 	}

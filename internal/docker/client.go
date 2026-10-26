@@ -224,13 +224,14 @@ func (r *RealClient) RemoveContainer(ctx context.Context, id string, force bool)
 }
 
 // Потоковое чтение логов контейнера (демультиплексирование stdout и stderr)
-func (r *RealClient) GetLogsStream(ctx context.Context, id string, tailLines int) (io.ReadCloser, error) {
+func (r *RealClient) GetLogsStream(ctx context.Context, id string, tailLines int, since string) (io.ReadCloser, error) {
 	opts := container.LogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,
 		Follow:     true,
 		Tail:       fmt.Sprintf("%d", tailLines),
 		Timestamps: false,
+		Since:      since,
 	}
 
 	rawLogs, err := r.cli.ContainerLogs(ctx, id, opts)

@@ -241,12 +241,67 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Управление на экране логов (Logs)
 		if m.activeView == ViewLogs {
+			// Если активен ввод поисковой строки в логах
+			if m.logsView.SearchActive {
+				switch msg.Type {
+				case tea.KeyEsc:
+					m.logsView.ClearSearch()
+					m.recalcDimensions()
+					return m, nil
+				case tea.KeyEnter:
+					m.logsView.ApplySearch(m.logsView.SearchInput.Value())
+					m.recalcDimensions()
+					return m, nil
+				default:
+					var cmd tea.Cmd
+					m.logsView.SearchInput, cmd = m.logsView.SearchInput.Update(msg)
+					return m, cmd
+				}
+			}
+
+			// Если нажата клавиша с Shift (например заглавные N или S)
+			rawKey := msg.String()
+			if rawKey == "N" || rawKey == "Т" {
+				m.logsView.PrevMatch()
+				return m, nil
+			}
+			if rawKey == "S" || rawKey == "Ы" {
+				sinceStr := m.logsView.CycleSince()
+				m.logsView.Clear()
+				m.toast = fmt.Sprintf("Фильтр времени логов: %s", m.logsView.SinceLabel())
+				m.toastIsErr = false
+				return m, tea.Batch(
+					m.startLogsStreamCmd(m.logsView.ContainerID, sinceStr),
+					m.clearToastCmd(),
+				)
+			}
+
 			switch key {
 			case "esc", "backspace":
+				if m.logsView.SearchQuery != "" {
+					m.logsView.ClearSearch()
+					return m, nil
+				}
 				m.stopLogsStream()
 				m.activeView = ViewList
 				m.recalcDimensions()
 				return m, nil
+			case "/", "ю":
+				m.logsView.FocusSearch()
+				m.recalcDimensions()
+				return m, nil
+			case "n", "т":
+				m.logsView.NextMatch()
+				return m, nil
+			case "e", "у":
+				errOnly := m.logsView.ToggleErrorIsolation()
+				if errOnly {
+					m.toast = "⚠️ Изоляция ошибок (Error Isolation) включена"
+				} else {
+					m.toast = "Отображаются все строки лога"
+				}
+				m.toastIsErr = false
+				return m, m.clearToastCmd()
 			case "f", "а":
 				m.logsView.ToggleFollow()
 				return m, nil
@@ -471,7 +526,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.activeView = ViewLogs
 				m.logsView.SetContainer(*c)
 				m.recalcDimensions()
-				cmds = append(cmds, m.startLogsStreamCmd(c.ID))
+				cmds = append(cmds, m.startLogsStreamCmd(c.ID, ""))
 			}
 
 		case "/", "ю": // Search
@@ -745,14 +800,19 @@ func (m *Model) executeActionCmd(id, name string, action model.ActionType) tea.C
 	}
 }
 
-func (m *Model) startLogsStreamCmd(id string) tea.Cmd {
+func (m *Model) startLogsStreamCmd(id string, since string) tea.Cmd {
 	m.stopLogsStream()
 	ctx, cancel := context.WithCancel(context.Background())
 	m.logsCancel = cancel
 	m.logChan = make(chan string, 100)
 
+	tail := 150
+	if since != "" {
+		tail = 1000
+	}
+
 	go func() {
-		reader, err := m.docker.GetLogsStream(ctx, id, 100)
+		reader, err := m.docker.GetLogsStream(ctx, id, tail, since)
 		if err != nil {
 			select {
 			case <-ctx.Done():

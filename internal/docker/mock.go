@@ -282,7 +282,7 @@ func (m *MockClient) RemoveContainer(ctx context.Context, id string, force bool)
 }
 
 // Имитация живого потока логов в реальном времени
-func (m *MockClient) GetLogsStream(ctx context.Context, id string, tailLines int) (io.ReadCloser, error) {
+func (m *MockClient) GetLogsStream(ctx context.Context, id string, tailLines int, since string) (io.ReadCloser, error) {
 	m.mu.Lock()
 	name := id
 	for _, c := range m.containers {
@@ -307,11 +307,15 @@ func (m *MockClient) GetLogsStream(ctx context.Context, id string, tailLines int
 			"[http] GET /api/v1/status 200 OK - 4ms",
 		}
 
+		if since != "" {
+			initLogs = append(initLogs, fmt.Sprintf("[dockdash] Logs filtered with --since=%s", since))
+		}
+
 		for _, l := range initLogs {
 			_, _ = fmt.Fprintf(pw, "%s %s\n", time.Now().Format("15:04:05"), l)
 		}
 
-		ticker := time.NewTicker(1500 * time.Millisecond)
+		ticker := time.NewTicker(1200 * time.Millisecond)
 		defer ticker.Stop()
 
 		samples := []string{
@@ -321,6 +325,10 @@ func (m *MockClient) GetLogsStream(ctx context.Context, id string, tailLines int
 			"[http] POST /events 201 Created - 12ms",
 			"[metrics] Flushed 42 data points to telemetry collector",
 			"[http] GET /api/v1/data 200 OK - 7ms",
+			"[WARN] Redis latency spike detected: 48ms",
+			"[ERROR] Database connection pool warning: 90% in use",
+			"[http] POST /api/checkout 500 Internal Server Error - 210ms",
+			"[worker] Processing queued task #48194",
 		}
 
 		for {

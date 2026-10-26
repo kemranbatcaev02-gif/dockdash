@@ -19,7 +19,7 @@ type Service interface {
 	RestartContainer(ctx context.Context, id string) error
 	KillContainer(ctx context.Context, id string) error
 	RemoveContainer(ctx context.Context, id string, force bool) error
-	GetLogsStream(ctx context.Context, id string, tailLines int) (io.ReadCloser, error)
+	GetLogsStream(ctx context.Context, id string, tailLines int, since string) (io.ReadCloser, error)
 	GetStats(ctx context.Context, id string) (model.StatsUpdate, error)
 	GetExecCommand(ctx context.Context, id string) (*exec.Cmd, error)
 	IsDemo() bool
