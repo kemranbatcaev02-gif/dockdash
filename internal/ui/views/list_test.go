@@ -78,3 +78,42 @@ func TestComposeProjectGrouping(t *testing.T) {
 		}
 	}
 }
+
+func TestAdvancedMetricsBadges(t *testing.T) {
+	containers := []model.ContainerInfo{
+		{
+			ID:                  "c1",
+			Name:                "heavy-service",
+			Status:              model.StatusRunning,
+			CPUPercent:          75.5,
+			CPUThrottledPercent: 28.0,
+			MemoryUsage:         490 * 1024 * 1024,
+			MemoryLimit:         512 * 1024 * 1024,
+			OOMRisk:             true,
+		},
+		{
+			ID:        "c2",
+			Name:      "crashed-service",
+			Status:    model.StatusExited,
+			OOMKilled: true,
+			ExitCode:  137,
+		},
+	}
+
+	v := NewContainersListView()
+	v.GroupByProject = false
+	v.Width = 120
+	v.Height = 15
+
+	rendered := v.Render(containers, false)
+
+	// Check for OOM KILLED indicator
+	if !strings.Contains(rendered, "OOM KILLED") {
+		t.Fatalf("Expected 'OOM KILLED' badge in rendered list for c2, got:\n%s", rendered)
+	}
+
+	// Check for CPU throttling warning indicator
+	if !strings.Contains(rendered, "⚠️") {
+		t.Fatalf("Expected '⚠️' warning badge in rendered list for heavy-service, got:\n%s", rendered)
+	}
+}

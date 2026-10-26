@@ -109,12 +109,14 @@ func (r *RealClient) InspectContainer(ctx context.Context, id string) (model.Con
 	started := ""
 	finished := ""
 	exitCode := 0
+	oomKilled := false
 
 	if jsonResp.State != nil {
 		status = jsonResp.State.Status
 		started = jsonResp.State.StartedAt
 		finished = jsonResp.State.FinishedAt
 		exitCode = jsonResp.State.ExitCode
+		oomKilled = jsonResp.State.OOMKilled || (exitCode == 137)
 	}
 
 	return model.ContainerDetails{
@@ -130,6 +132,7 @@ func (r *RealClient) InspectContainer(ctx context.Context, id string) (model.Con
 		StartedAt:     started,
 		FinishedAt:    finished,
 		ExitCode:      exitCode,
+		OOMKilled:     oomKilled,
 		RestartPolicy: restartPolicy,
 		Mounts:        mountsList,
 		Env:           envList,
@@ -184,6 +187,12 @@ func (r *RealClient) ListContainers(ctx context.Context) ([]model.ContainerInfo,
 			composeService = c.Labels["com.docker.compose.service"]
 		}
 
+		oomKilled := strings.Contains(c.Status, "Exited (137)") || strings.Contains(c.Status, "(137)")
+		exitCode := 0
+		if oomKilled {
+			exitCode = 137
+		}
+
 		result = append(result, model.ContainerInfo{
 			ID:             c.ID,
 			ShortID:        shortID,
@@ -195,6 +204,8 @@ func (r *RealClient) ListContainers(ctx context.Context) ([]model.ContainerInfo,
 			Created:        time.Unix(c.Created, 0),
 			ComposeProject: composeProject,
 			ComposeService: composeService,
+			OOMKilled:      oomKilled,
+			ExitCode:       exitCode,
 		})
 	}
 
@@ -285,11 +296,27 @@ func (r *RealClient) GetStats(ctx context.Context, id string) (model.StatsUpdate
 		memUsage -= cache
 	}
 
+	// Расчет троттлинга CPU cgroups
+	throttledPercent := 0.0
+	if stats.CPUStats.ThrottlingData.Periods > 0 {
+		throttledPercent = (float64(stats.CPUStats.ThrottlingData.ThrottledPeriods) / float64(stats.CPUStats.ThrottlingData.Periods)) * 100.0
+	}
+
+	// Проверка риска OOM (память >= 90% от лимита)
+	oomRisk := false
+	if stats.MemoryStats.Limit > 0 && memUsage > 0 {
+		if (float64(memUsage) / float64(stats.MemoryStats.Limit)) >= 0.90 {
+			oomRisk = true
+		}
+	}
+
 	return model.StatsUpdate{
-		ContainerID: id,
-		CPUPercent:  cpuPercent,
-		MemoryUsage: memUsage,
-		MemoryLimit: stats.MemoryStats.Limit,
+		ContainerID:         id,
+		CPUPercent:          cpuPercent,
+		MemoryUsage:         memUsage,
+		MemoryLimit:         stats.MemoryStats.Limit,
+		CPUThrottledPercent: throttledPercent,
+		OOMRisk:             oomRisk,
 	}, nil
 }
 

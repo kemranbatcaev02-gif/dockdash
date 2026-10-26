@@ -379,8 +379,13 @@ func (v *ContainersListView) Render(containers []model.ContainerInfo, active boo
 			statusText = "● RUNNING"
 			statusColor = styles.ColorSuccess
 		case model.StatusExited:
-			statusText = "○ EXITED"
-			statusColor = styles.ColorMuted
+			if c.OOMKilled || c.ExitCode == 137 {
+				statusText = "💀 OOM KILLED"
+				statusColor = styles.ColorDanger
+			} else {
+				statusText = "○ EXITED"
+				statusColor = styles.ColorMuted
+			}
 		case model.StatusPaused:
 			statusText = "⏸ PAUSED"
 			statusColor = styles.ColorWarning
@@ -432,12 +437,27 @@ func (v *ContainersListView) Render(containers []model.ContainerInfo, active boo
 			rowParts = append(rowParts, cell(padOrTrunc(c.Ports, portsWidth), styles.ColorTextDim, false))
 		}
 
+		// CPU Column с индикацией cgroups throttling
+		cpuStr := c.FormatCPU()
+		cpuFg := styles.ColorText
+		if c.CPUThrottledPercent > 0 && c.Status == model.StatusRunning {
+			cpuStr = fmt.Sprintf("%.0f%%⚠️", c.CPUPercent)
+			cpuFg = styles.ColorWarning
+		}
+
 		rowParts = append(rowParts, cell(" ", styles.ColorMuted, false))
 		if showBars && c.Status == model.StatusRunning {
 			bar := styles.RenderMiniBar(c.CPUPercent, barLen, isSelected)
-			rowParts = append(rowParts, bar, cell(" ", styles.ColorMuted, false), cell(padOrTrunc(c.FormatCPU(), cpuWidth-barLen-1), styles.ColorText, false))
+			rowParts = append(rowParts, bar, cell(" ", styles.ColorMuted, false), cell(padOrTrunc(cpuStr, cpuWidth-barLen-1), cpuFg, false))
 		} else {
-			rowParts = append(rowParts, cell(padOrTrunc(c.FormatCPU(), cpuWidth), styles.ColorText, false))
+			rowParts = append(rowParts, cell(padOrTrunc(cpuStr, cpuWidth), cpuFg, false))
+		}
+
+		// Memory Column с предупреждением OOM Risk
+		memStr := c.FormatMemory()
+		memFg := styles.ColorTextDim
+		if c.OOMRisk && c.Status == model.StatusRunning {
+			memFg = styles.ColorDanger
 		}
 
 		rowParts = append(rowParts, cell(" ", styles.ColorMuted, false))
@@ -447,9 +467,15 @@ func (v *ContainersListView) Render(containers []model.ContainerInfo, active boo
 				memPct = (float64(c.MemoryUsage) / float64(c.MemoryLimit)) * 100.0
 			}
 			bar := styles.RenderMiniBar(memPct, barLen, isSelected)
-			rowParts = append(rowParts, bar, cell(" ", styles.ColorMuted, false), cell(padOrTrunc(c.FormatMemory(), memWidth-barLen-1), styles.ColorTextDim, false))
+			if c.OOMRisk {
+				memStr = "⚠️" + memStr
+			}
+			rowParts = append(rowParts, bar, cell(" ", styles.ColorMuted, false), cell(padOrTrunc(memStr, memWidth-barLen-1), memFg, c.OOMRisk))
 		} else {
-			rowParts = append(rowParts, cell(padOrTrunc(c.FormatMemory(), memWidth), styles.ColorTextDim, false))
+			if c.OOMRisk {
+				memStr = "⚠️" + memStr
+			}
+			rowParts = append(rowParts, cell(padOrTrunc(memStr, memWidth), memFg, c.OOMRisk))
 		}
 
 		if showUptime {

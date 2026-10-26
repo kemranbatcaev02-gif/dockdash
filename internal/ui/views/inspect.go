@@ -45,7 +45,26 @@ func (v *InspectView) SetDetails(d model.ContainerDetails) {
 	sb.WriteString(fmt.Sprintf("%s %s\n", labelKey.Render("Статус:"), valStyle.Render(d.Status)))
 	sb.WriteString(fmt.Sprintf("%s %s\n", labelKey.Render("Команда:"), valStyle.Render(d.Command)))
 	sb.WriteString(fmt.Sprintf("%s %s\n", labelKey.Render("Рестарт:"), valStyle.Render(d.RestartPolicy)))
-	sb.WriteString(fmt.Sprintf("%s %d\n", labelKey.Render("Код выхода:"), d.ExitCode))
+
+	exitCodeStr := fmt.Sprintf("%d", d.ExitCode)
+	if d.OOMKilled || d.ExitCode == 137 {
+		exitCodeStr = lipgloss.NewStyle().Foreground(styles.ColorDanger).Bold(true).Render("137 (OOM KILLED — процесс принудительно убит из-за нехватки памяти)")
+	}
+	sb.WriteString(fmt.Sprintf("%s %s\n", labelKey.Render("Код выхода:"), exitCodeStr))
+
+	// Ресурсы и ограничения cgroups
+	sb.WriteString(sectionStyle.Render("● РЕСУРСЫ И CGROUPS") + "\n")
+	throttlingStr := lipgloss.NewStyle().Foreground(styles.ColorSuccess).Render("0% (троттлинг не зафиксирован)")
+	if d.CPUThrottledPercent > 0 {
+		throttlingStr = lipgloss.NewStyle().Foreground(styles.ColorWarning).Bold(true).Render(fmt.Sprintf("⚠️ %.1f%% (CFS Quota Throttling — контейнеру не хватает квоты CPU!)", d.CPUThrottledPercent))
+	}
+	sb.WriteString(fmt.Sprintf("%s %s\n", labelKey.Render("CPU Throttling:"), throttlingStr))
+
+	oomRiskStr := lipgloss.NewStyle().Foreground(styles.ColorSuccess).Render("В норме (< 90%)")
+	if d.OOMRisk {
+		oomRiskStr = lipgloss.NewStyle().Foreground(styles.ColorDanger).Bold(true).Render("⚠️ КРИТИЧЕСКИЙ (Использование памяти > 90% лимита!)")
+	}
+	sb.WriteString(fmt.Sprintf("%s %s\n", labelKey.Render("Риск OOM:"), oomRiskStr))
 
 	// Сеть
 	sb.WriteString(sectionStyle.Render("● СЕТЬ") + "\n")

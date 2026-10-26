@@ -129,6 +129,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.containers[i].CPUPercent = msg.CPUPercent
 				m.containers[i].MemoryUsage = msg.MemoryUsage
 				m.containers[i].MemoryLimit = msg.MemoryLimit
+				m.containers[i].CPUThrottledPercent = msg.CPUThrottledPercent
+				m.containers[i].OOMRisk = msg.OOMRisk
 				break
 			}
 		}
@@ -761,12 +763,28 @@ func (m *Model) loadDaemonInfoCmd() tea.Cmd {
 }
 
 func (m *Model) inspectContainerCmd(id string) tea.Cmd {
+	var liveThrottling float64
+	var liveOOMRisk bool
+	for _, c := range m.containers {
+		if c.ID == id || c.ShortID == id {
+			liveThrottling = c.CPUThrottledPercent
+			liveOOMRisk = c.OOMRisk
+			break
+		}
+	}
+
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		details, err := m.docker.InspectContainer(ctx, id)
 		if err != nil {
 			return actionResultMsg{Action: "inspect", Err: err}
+		}
+		if liveThrottling > 0 {
+			details.CPUThrottledPercent = liveThrottling
+		}
+		if liveOOMRisk {
+			details.OOMRisk = liveOOMRisk
 		}
 		return inspectDetailsMsg(details)
 	}

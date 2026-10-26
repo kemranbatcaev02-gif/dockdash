@@ -18,21 +18,25 @@ const (
 
 // Краткая инфа о контейнере для главной таблицы
 type ContainerInfo struct {
-	ID          string          `json:"id"`
-	ShortID     string          `json:"short_id"`
-	Name        string          `json:"name"`
-	Image       string          `json:"image"`
-	Status      ContainerStatus `json:"status"`
-	StateText   string          `json:"state_text"` // например: "Up 2 hours"
-	Ports       string          `json:"ports"`
-	Created     time.Time       `json:"created"`
-	CPUPercent     float64         `json:"cpu_percent"`
-	MemoryUsage    uint64          `json:"memory_usage"`
-	MemoryLimit    uint64          `json:"memory_limit"`
-	ComposeProject string          `json:"compose_project"`
-	ComposeService string          `json:"compose_service"`
-	IsLoading      bool            `json:"is_loading"`
-	LoadingMsg     string          `json:"loading_msg"`
+	ID                  string          `json:"id"`
+	ShortID             string          `json:"short_id"`
+	Name                string          `json:"name"`
+	Image               string          `json:"image"`
+	Status              ContainerStatus `json:"status"`
+	StateText           string          `json:"state_text"` // например: "Up 2 hours"
+	Ports               string          `json:"ports"`
+	Created             time.Time       `json:"created"`
+	CPUPercent          float64         `json:"cpu_percent"`
+	MemoryUsage         uint64          `json:"memory_usage"`
+	MemoryLimit         uint64          `json:"memory_limit"`
+	CPUThrottledPercent float64         `json:"cpu_throttled_percent"` // Процент троттлинга процессора cgroups
+	OOMRisk             bool            `json:"oom_risk"`              // Память превышает 90% лимита
+	OOMKilled           bool            `json:"oom_killed"`            // Контейнер был убит по OOM (ExitCode 137)
+	ExitCode            int             `json:"exit_code"`
+	ComposeProject      string          `json:"compose_project"`
+	ComposeService      string          `json:"compose_service"`
+	IsLoading           bool            `json:"is_loading"`
+	LoadingMsg          string          `json:"loading_msg"`
 }
 
 // Форматирование памяти (МБ / ГБ)
@@ -66,22 +70,25 @@ func FormatPorts(ports []string) string {
 
 // Полная инфа о контейнере для экрана инспекции [i]
 type ContainerDetails struct {
-	ID            string            `json:"id"`
-	Name          string            `json:"name"`
-	Image         string            `json:"image"`
-	Status        string            `json:"status"`
-	IPAddress     string            `json:"ip_address"`
-	Gateway       string            `json:"gateway"`
-	MACAddress    string            `json:"mac_address"`
-	Command       string            `json:"command"`
-	CreatedAt     string            `json:"created_at"`
-	StartedAt     string            `json:"started_at"`
-	FinishedAt    string            `json:"finished_at"`
-	ExitCode      int               `json:"exit_code"`
-	RestartPolicy string            `json:"restart_policy"`
-	Mounts        []string          `json:"mounts"`
-	Env           []string          `json:"env"`
-	Labels        map[string]string `json:"labels"`
+	ID                  string            `json:"id"`
+	Name                string            `json:"name"`
+	Image               string            `json:"image"`
+	Status              string            `json:"status"`
+	IPAddress           string            `json:"ip_address"`
+	Gateway             string            `json:"gateway"`
+	MACAddress          string            `json:"mac_address"`
+	Command             string            `json:"command"`
+	CreatedAt           string            `json:"created_at"`
+	StartedAt           string            `json:"started_at"`
+	FinishedAt          string            `json:"finished_at"`
+	ExitCode            int               `json:"exit_code"`
+	OOMKilled           bool              `json:"oom_killed"`
+	CPUThrottledPercent float64           `json:"cpu_throttled_percent"`
+	OOMRisk             bool              `json:"oom_risk"`
+	RestartPolicy       string            `json:"restart_policy"`
+	Mounts              []string          `json:"mounts"`
+	Env                 []string          `json:"env"`
+	Labels              map[string]string `json:"labels"`
 }
 
 // Общая статистика самого Docker
@@ -117,8 +124,10 @@ type ActionResult struct {
 
 // Обновление метрик CPU/RAM в реальном времени
 type StatsUpdate struct {
-	ContainerID string
-	CPUPercent  float64
-	MemoryUsage uint64
-	MemoryLimit uint64
+	ContainerID         string
+	CPUPercent          float64
+	MemoryUsage         uint64
+	MemoryLimit         uint64
+	CPUThrottledPercent float64
+	OOMRisk             bool
 }
