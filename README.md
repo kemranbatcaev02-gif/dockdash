@@ -6,7 +6,7 @@
   <img src="https://img.shields.io/badge/Styles-Lipgloss-FF79C6?style=for-the-badge" alt="Lipgloss" />
   <img src="https://img.shields.io/badge/Docker-Engine%20SDK-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker SDK" />
   <img src="https://img.shields.io/badge/Platform-Windows%20|%20Linux%20|%20macOS-45475A?style=for-the-badge" alt="Cross-Platform" />
-  <img src="https://img.shields.io/badge/License-MIT-A6E3A1?style=for-the-badge" alt="MIT License" />
+  <img src="https://img.shields.io/badge/License-Proprietary%20%7C%20All%20Rights%20Reserved-critical?style=for-the-badge" alt="Proprietary License" />
 </p>
 
 <p align="center">
@@ -254,7 +254,7 @@ dockdash/
 ├── docker-compose.test.yml       # Песочница с микросервисами для тестирования
 ├── go.mod                        # Модули и зависимости Go
 ├── go.sum                        # Контрольные суммы зависимостей
-├── LICENSE                       # Лицензия MIT
+├── LICENSE                       # Проприетарная лицензия (All Rights Reserved)
 └── README.md                     # Документация проекта
 ```
 
@@ -272,6 +272,12 @@ go test -v ./...
 
 ---
 
-## 📜 Лицензия
+## 📜 Лицензия и условия использования
 
-Проект распространяется под свободной лицензией **[MIT](LICENSE)**. Вы можете свободно использовать, модифицировать и внедрять данный код в свои проекты.
+Проект распространяется под **проприетарной лицензией ([Proprietary / All Rights Reserved](LICENSE))**:
+
+- ⛔ **Запрет на коммерческое и некоммерческое использование:** любое копирование, развертывание, модификация, распространение или использование исходного кода и скомпилированных бинарных файлов (как в коммерческих, так и в некоммерческих целях) **строго запрещены** без предварительного письменного согласия правообладателя.
+- 👁️ **Ознакомительный статус:** исходный код опубликован исключительно для ознакомления и публичной демонстрации архитектурных решений.
+- 📩 **Запрос разрешения / покупка лицензии:** для получения прав на использование проекта, приобретения лицензии или сотрудничества обращайтесь к автору:
+  - **Telegram автора:** [@kemq78](https://t.me/kemq78)
+  - **Официальный Telegram-канал:** [@connecto_official](https://t.me/connecto_official)
