@@ -175,3 +175,38 @@ func TestMockDiskAndPrune(t *testing.T) {
 		t.Fatalf("expected non-zero cleaned bytes for build cache")
 	}
 }
+
+func TestMockContextSwitching(t *testing.T) {
+	ctx := context.Background()
+	mock := NewMockClient()
+
+	if mock.CurrentContext() != "default" {
+		t.Fatalf("expected initial context to be default, got %s", mock.CurrentContext())
+	}
+
+	contexts, err := mock.ListContexts(ctx)
+	if err != nil || len(contexts) < 3 {
+		t.Fatalf("expected at least 3 contexts, got %d, err: %v", len(contexts), err)
+	}
+
+	// Switch to staging
+	if err := mock.SwitchContext(ctx, "staging"); err != nil {
+		t.Fatalf("SwitchContext to staging failed: %v", err)
+	}
+	if mock.CurrentContext() != "staging" {
+		t.Fatalf("expected current context staging, got %s", mock.CurrentContext())
+	}
+
+	containers, err := mock.ListContainers(ctx)
+	if err != nil || len(containers) == 0 {
+		t.Fatalf("expected containers in staging context")
+	}
+	if containers[0].Name != "staging-frontend" {
+		t.Fatalf("expected staging container, got %s", containers[0].Name)
+	}
+
+	// Switch to non-existent context should fail
+	if err := mock.SwitchContext(ctx, "unknown-ctx"); err == nil {
+		t.Fatalf("expected error switching to unknown context")
+	}
+}

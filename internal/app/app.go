@@ -52,43 +52,50 @@ type imageLayersMsg struct {
 	layers  []model.ImageLayerInfo
 }
 type pruneResultMsg model.PruneResult
+type contextsListMsg []model.DockerContext
+type contextSwitchResultMsg struct {
+	name string
+	err  error
+}
 type toastClearMsg struct{}
 type tickMsg time.Time
 type execFinishedMsg struct{ err error }
 
 // Главное состояние программы
 type Model struct {
-	docker      docker.Service
-	daemonInfo  model.DaemonInfo
-	containers  []model.ContainerInfo
-	listView    views.ContainersListView
-	logsView    views.LogsView
-	inspectView views.InspectView
-	diskView    views.DiskView
-	filterBar   views.FilterBar
-	modal       views.ConfirmationModal
-	help        views.HelpView
-	activeView  ActiveView
-	sortMode    SortMode
-	width       int
-	height      int
-	toast       string
-	toastIsErr  bool
-	logsCancel  context.CancelFunc
-	logChan     chan string
-	statsCancel context.CancelFunc
+	docker       docker.Service
+	daemonInfo   model.DaemonInfo
+	containers   []model.ContainerInfo
+	listView     views.ContainersListView
+	logsView     views.LogsView
+	inspectView  views.InspectView
+	diskView     views.DiskView
+	contextModal views.ContextModal
+	filterBar    views.FilterBar
+	modal        views.ConfirmationModal
+	help         views.HelpView
+	activeView   ActiveView
+	sortMode     SortMode
+	width        int
+	height       int
+	toast        string
+	toastIsErr   bool
+	logsCancel   context.CancelFunc
+	logChan      chan string
+	statsCancel  context.CancelFunc
 }
 
 // Создаем главное состояние программы
 func New(service docker.Service) Model {
 	return Model{
-		docker:      service,
-		listView:    views.NewContainersListView(),
-		logsView:    views.NewLogsView(),
-		inspectView: views.NewInspectView(),
-		diskView:    views.NewDiskView(),
-		filterBar:   views.NewFilterBar(),
-		activeView:  ViewList,
+		docker:       service,
+		listView:     views.NewContainersListView(),
+		logsView:     views.NewLogsView(),
+		inspectView:  views.NewInspectView(),
+		diskView:     views.NewDiskView(),
+		contextModal: views.NewContextModal(),
+		filterBar:    views.NewFilterBar(),
+		activeView:   ViewList,
 	}
 }
 
@@ -186,6 +193,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cmds = append(cmds, m.clearToastCmd(), m.loadDiskUsageCmd(), m.loadContainersCmd(), m.loadDaemonInfoCmd())
 
+	case contextsListMsg:
+		m.contextModal.Show([]model.DockerContext(msg))
+
+	case contextSwitchResultMsg:
+		if msg.err != nil {
+			m.toast = fmt.Sprintf("✖ Ошибка подключения к хосту: %v", msg.err)
+			m.toastIsErr = true
+		} else {
+			m.toast = fmt.Sprintf("✔ Подключено к Docker Context '%s'", msg.name)
+			m.toastIsErr = false
+		}
+		cmds = append(cmds, m.clearToastCmd(), m.loadContainersCmd(), m.loadDaemonInfoCmd())
+
 	case execFinishedMsg:
 		if msg.err != nil {
 			m.toast = fmt.Sprintf("✖ Ошибка шелла: %v", msg.err)
@@ -206,6 +226,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.stopLogsStream()
 				return m, tea.Quit
 			}
+		}
+
+		// Если открыто окно выбора Docker Context (Multi-Host)
+		if m.contextModal.Active {
+			switch key {
+			case "up", "k", "л":
+				m.contextModal.MoveUp()
+				return m, nil
+			case "down", "j", "о":
+				m.contextModal.MoveDown()
+				return m, nil
+			case "enter":
+				if c := m.contextModal.GetSelected(); c != nil {
+					target := c.Name
+					m.contextModal.Hide()
+					m.toast = fmt.Sprintf("Подключение к хосту '%s'...", target)
+					m.toastIsErr = false
+					return m, tea.Batch(
+						m.switchContextCmd(target),
+						m.clearToastCmd(),
+					)
+				}
+				return m, nil
+			case "esc", "q", "й":
+				m.contextModal.Hide()
+				return m, nil
+			}
+			return m, nil
 		}
 
 		// Если открыто окно подтверждения
@@ -610,6 +658,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.recalcDimensions()
 			return m, m.loadDiskUsageCmd()
 
+		case "c", "с": // Выбор Docker Context (Multi-Host Switcher)
+			return m, m.loadContextsCmd()
+
 		case "/", "ю": // Search
 			m.filterBar.Focus()
 
@@ -671,10 +722,20 @@ func (m Model) View() string {
 			Render("SORT: " + sortNames[m.sortMode])
 	}
 
+	ctxName := m.docker.CurrentContext()
+	ctxBadge := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#11111B")).
+		Background(lipgloss.Color("#89B4FA")).
+		Padding(0, 1).
+		Render("HOST: " + ctxName)
+
 	header := lipgloss.JoinHorizontal(
 		lipgloss.Center,
 		title,
 		modeBadge,
+		"  ",
+		ctxBadge,
 		"  ",
 		daemonStats,
 	)
@@ -744,7 +805,11 @@ func (m Model) View() string {
 		helpContent,
 	)
 
-	// 4. Поверх экрана рисуем модалку, если запрошено удаление
+	// 4. Поверх экрана рисуем модалки
+	if m.contextModal.Active {
+		return m.contextModal.Render(m.width, m.height)
+	}
+
 	if m.modal.Active {
 		modalOverlay := m.modal.Render(m.width, m.height)
 		return modalOverlay
@@ -1020,5 +1085,26 @@ func (m *Model) pruneCmd(target model.PruneTarget) tea.Cmd {
 			return pruneResultMsg{Target: target, Err: err}
 		}
 		return pruneResultMsg(res)
+	}
+}
+
+func (m *Model) loadContextsCmd() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		contexts, err := m.docker.ListContexts(ctx)
+		if err != nil {
+			return actionResultMsg{Action: "list_contexts", Err: err}
+		}
+		return contextsListMsg(contexts)
+	}
+}
+
+func (m *Model) switchContextCmd(name string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		err := m.docker.SwitchContext(ctx, name)
+		return contextSwitchResultMsg{name: name, err: err}
 	}
 }

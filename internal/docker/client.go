@@ -20,7 +20,9 @@ import (
 
 // Клиент для подключения к живому Docker
 type RealClient struct {
-	cli *client.Client
+	cli            *client.Client
+	currentContext string
+	contexts       []model.DockerContext
 }
 
 // Создание клиента с автоопределением версии API
@@ -29,7 +31,7 @@ func NewRealClient() (*RealClient, error) {
 	if err != nil {
 		return nil, fmt.Errorf("ошибка создания клиента docker: %w", err)
 	}
-	return &RealClient{cli: cli}, nil
+	return &RealClient{cli: cli, currentContext: "default"}, nil
 }
 
 // Проверка доступности Docker
@@ -489,4 +491,97 @@ func (r *RealClient) Prune(ctx context.Context, target model.PruneTarget) (model
 		Target:       target,
 		SpaceCleaned: cleaned,
 	}, nil
+}
+
+func (r *RealClient) CurrentContext() string {
+	if r.currentContext == "" {
+		return "default"
+	}
+	return r.currentContext
+}
+
+// Получение списка настроенных Docker Contexts (локальные и удаленные ssh/tcp)
+func (r *RealClient) ListContexts(ctx context.Context) ([]model.DockerContext, error) {
+	cmd := exec.CommandContext(ctx, "docker", "context", "ls", "--format", "{{json .}}")
+	out, err := cmd.Output()
+	if err != nil {
+		return []model.DockerContext{
+			{Name: "default", Description: "Local Docker daemon", Endpoint: "local", IsCurrent: true},
+		}, nil
+	}
+
+	var contexts []model.DockerContext
+	lines := strings.Split(string(out), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var raw struct {
+			Name           string `json:"Name"`
+			Current        bool   `json:"Current"`
+			Description    string `json:"Description"`
+			DockerEndpoint string `json:"DockerEndpoint"`
+		}
+		if err := json.Unmarshal([]byte(line), &raw); err == nil && raw.Name != "" {
+			isCurr := raw.Current
+			if r.currentContext != "" {
+				isCurr = (raw.Name == r.currentContext)
+			}
+			contexts = append(contexts, model.DockerContext{
+				Name:        raw.Name,
+				Description: raw.Description,
+				Endpoint:    raw.DockerEndpoint,
+				IsCurrent:   isCurr,
+			})
+		}
+	}
+
+	if len(contexts) == 0 {
+		contexts = append(contexts, model.DockerContext{
+			Name:        "default",
+			Description: "Current local daemon",
+			Endpoint:    "local",
+			IsCurrent:   true,
+		})
+	}
+
+	r.contexts = contexts
+	return contexts, nil
+}
+
+// Переключение на удаленный или другой локальный Docker хост
+func (r *RealClient) SwitchContext(ctx context.Context, name string) error {
+	var targetEndpoint string
+	for _, c := range r.contexts {
+		if c.Name == name {
+			targetEndpoint = c.Endpoint
+			break
+		}
+	}
+
+	var newCli *client.Client
+	var err error
+
+	if name == "default" || targetEndpoint == "" || targetEndpoint == "local" {
+		newCli, err = client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
+	} else {
+		newCli, err = client.NewClientWithOpts(client.WithHost(targetEndpoint), client.WithAPIVersionNegotiation())
+	}
+
+	if err != nil {
+		return fmt.Errorf("не удалось создать клиент для контекста '%s': %w", name, err)
+	}
+
+	pingCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	if _, err := newCli.Ping(pingCtx); err != nil {
+		_ = newCli.Close()
+		return fmt.Errorf("хост '%s' (%s) недоступен: %w", name, targetEndpoint, err)
+	}
+
+	_ = r.cli.Close()
+	r.cli = newCli
+	r.currentContext = name
+	return nil
 }

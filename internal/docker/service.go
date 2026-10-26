@@ -25,5 +25,8 @@ type Service interface {
 	GetDiskUsage(ctx context.Context) (model.DiskUsageInfo, error)
 	GetImageLayers(ctx context.Context, imageID string) ([]model.ImageLayerInfo, error)
 	Prune(ctx context.Context, target model.PruneTarget) (model.PruneResult, error)
+	ListContexts(ctx context.Context) ([]model.DockerContext, error)
+	SwitchContext(ctx context.Context, name string) error
+	CurrentContext() string
 	IsDemo() bool
 }

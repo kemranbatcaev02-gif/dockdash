@@ -15,14 +15,22 @@ import (
 
 // Демо-клиент с тестовыми контейнерами (работает без запущенного Docker)
 type MockClient struct {
-	mu         sync.Mutex
-	containers []model.ContainerInfo
+	mu             sync.Mutex
+	containers     []model.ContainerInfo
+	currentContext string
+	contexts       []model.DockerContext
 }
 
 // Создание тестового набора микросервисов
 func NewMockClient() *MockClient {
 	now := time.Now()
 	return &MockClient{
+		currentContext: "default",
+		contexts: []model.DockerContext{
+			{Name: "default", Description: "Local Docker Engine", Endpoint: "npipe:////./pipe/docker_engine", IsCurrent: true},
+			{Name: "staging", Description: "Staging Cluster (AWS EC2)", Endpoint: "ssh://deploy@staging.cloud", IsCurrent: false},
+			{Name: "production", Description: "Production K8s Node", Endpoint: "ssh://admin@prod-cluster.io", IsCurrent: false},
+		},
 		containers: []model.ContainerInfo{
 			{
 				ID:          "c1a2b3d4e5f6789012345678",
@@ -505,4 +513,58 @@ func (m *MockClient) Prune(ctx context.Context, target model.PruneTarget) (model
 		Target:       target,
 		SpaceCleaned: reclaimed,
 	}, nil
+}
+
+func (m *MockClient) CurrentContext() string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.currentContext == "" {
+		return "default"
+	}
+	return m.currentContext
+}
+
+func (m *MockClient) ListContexts(ctx context.Context) ([]model.DockerContext, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]model.DockerContext, len(m.contexts))
+	copy(out, m.contexts)
+	return out, nil
+}
+
+func (m *MockClient) SwitchContext(ctx context.Context, name string) error {
+	time.Sleep(150 * time.Millisecond)
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	found := false
+	for i := range m.contexts {
+		if m.contexts[i].Name == name {
+			m.contexts[i].IsCurrent = true
+			found = true
+		} else {
+			m.contexts[i].IsCurrent = false
+		}
+	}
+	if !found {
+		return fmt.Errorf("контекст '%s' не найден", name)
+	}
+
+	m.currentContext = name
+	now := time.Now()
+
+	if name == "staging" {
+		m.containers = []model.ContainerInfo{
+			{ID: "stg-fe", ShortID: "stgfe01", Name: "staging-frontend", Image: "frontend:nextjs", Status: model.StatusRunning, StateText: "Up 1 day", Ports: "3000->3000/tcp", Created: now.Add(-24 * time.Hour), CPUPercent: 2.1, MemoryUsage: 140 * 1024 * 1024, MemoryLimit: 1024 * 1024 * 1024, ComposeProject: "staging-app"},
+			{ID: "stg-be", ShortID: "stgbe02", Name: "staging-api", Image: "backend:golang", Status: model.StatusRunning, StateText: "Up 1 day", Ports: "8080->8080/tcp", Created: now.Add(-24 * time.Hour), CPUPercent: 5.4, MemoryUsage: 85 * 1024 * 1024, MemoryLimit: 1024 * 1024 * 1024, ComposeProject: "staging-app"},
+			{ID: "stg-db", ShortID: "stgdb03", Name: "staging-postgres", Image: "postgres:16", Status: model.StatusRunning, StateText: "Up 3 days", Ports: "5432->5432/tcp", Created: now.Add(-72 * time.Hour), CPUPercent: 1.2, MemoryUsage: 250 * 1024 * 1024, MemoryLimit: 2048 * 1024 * 1024, ComposeProject: "staging-app"},
+		}
+	} else if name == "production" {
+		m.containers = []model.ContainerInfo{
+			{ID: "prod-gw", ShortID: "prodgw01", Name: "prod-ingress-nginx", Image: "nginx:alpine", Status: model.StatusRunning, StateText: "Up 45 days", Ports: "80->80/tcp, 443->443/tcp", Created: now.Add(-45 * 24 * time.Hour), CPUPercent: 14.8, MemoryUsage: 210 * 1024 * 1024, MemoryLimit: 1024 * 1024 * 1024, ComposeProject: "prod-infra"},
+			{ID: "prod-ord", ShortID: "prodord02", Name: "order-service", Image: "order-service:v2.4", Status: model.StatusRunning, StateText: "Up 12 days", Ports: "8081->8081/tcp", Created: now.Add(-12 * 24 * time.Hour), CPUPercent: 28.5, MemoryUsage: 450 * 1024 * 1024, MemoryLimit: 2048 * 1024 * 1024, ComposeProject: "prod-apps"},
+			{ID: "prod-bill", ShortID: "prodbill03", Name: "billing-engine", Image: "billing:v1.9", Status: model.StatusRunning, StateText: "Up 12 days", Ports: "8082->8082/tcp", Created: now.Add(-12 * 24 * time.Hour), CPUPercent: 18.2, MemoryUsage: 380 * 1024 * 1024, MemoryLimit: 2048 * 1024 * 1024, ComposeProject: "prod-apps"},
+		}
+	}
+	return nil
 }

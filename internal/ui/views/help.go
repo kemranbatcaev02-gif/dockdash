@@ -63,6 +63,7 @@ func (h HelpView) Render(activeMode string, isFiltered bool, isModal bool, isSpl
 			{Key: "x", Desc: "Шелл"},
 			{Key: "r", Desc: "Рестарт"},
 			{Key: "p", Desc: "Диск/Prune"},
+			{Key: "C", Desc: "Контекст"},
 			{Key: "Tab", Desc: "Свернуть"},
 			{Key: "g", Desc: "Стек"},
 			{Key: "s", Desc: "Сортировка"},
