@@ -11,7 +11,9 @@ import (
 
 	"dockdash/internal/model"
 
+	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/client"
 	"github.com/docker/docker/pkg/stdcopy"
 )
@@ -328,4 +330,163 @@ func (r *RealClient) GetExecCommand(ctx context.Context, id string) (*exec.Cmd, 
 
 func (r *RealClient) IsDemo() bool {
 	return false
+}
+
+// Получение статистики использования диска (docker system df)
+func (r *RealClient) GetDiskUsage(ctx context.Context) (model.DiskUsageInfo, error) {
+	du, err := r.cli.DiskUsage(ctx, types.DiskUsageOptions{})
+	if err != nil {
+		return model.DiskUsageInfo{}, err
+	}
+
+	info := model.DiskUsageInfo{
+		ImagesCount:     len(du.Images),
+		ContainersCount: len(du.Containers),
+		VolumesCount:    len(du.Volumes),
+	}
+
+	for _, img := range du.Images {
+		info.ImagesTotalSize += img.Size
+		repo := "<none>"
+		tag := "<none>"
+		if len(img.RepoTags) > 0 {
+			parts := strings.Split(img.RepoTags[0], ":")
+			if len(parts) >= 2 {
+				repo = parts[0]
+				tag = parts[1]
+			} else {
+				repo = img.RepoTags[0]
+			}
+		}
+		shortID := strings.TrimPrefix(img.ID, "sha256:")
+		if len(shortID) > 12 {
+			shortID = shortID[:12]
+		}
+		info.ImagesList = append(info.ImagesList, model.ImageItem{
+			ID:         img.ID,
+			ShortID:    shortID,
+			Repository: repo,
+			Tag:        tag,
+			Size:       img.Size,
+			Created:    time.Unix(img.Created, 0),
+		})
+	}
+
+	for _, c := range du.Containers {
+		info.ContainersTotalSize += c.SizeRw
+	}
+
+	for _, v := range du.Volumes {
+		if v.UsageData != nil {
+			info.VolumesTotalSize += v.UsageData.Size
+			if v.UsageData.RefCount == 0 {
+				info.VolumesReclaimable += v.UsageData.Size
+			}
+		}
+	}
+
+	for _, bc := range du.BuildCache {
+		info.BuildCacheTotalSize += bc.Size
+		if !bc.InUse {
+			info.BuildCacheReclaimable += bc.Size
+		}
+	}
+
+	info.TotalSize = info.ImagesTotalSize + info.ContainersTotalSize + info.VolumesTotalSize + info.BuildCacheTotalSize
+	info.TotalReclaimable = info.ImagesReclaimable + info.ContainersReclaimable + info.VolumesReclaimable + info.BuildCacheReclaimable
+	if info.TotalReclaimable == 0 && info.BuildCacheTotalSize > 0 {
+		info.TotalReclaimable = info.BuildCacheTotalSize
+	}
+
+	return info, nil
+}
+
+// Получение слоев образа для анализа раздутия (dive-style)
+func (r *RealClient) GetImageLayers(ctx context.Context, imageID string) ([]model.ImageLayerInfo, error) {
+	history, err := r.cli.ImageHistory(ctx, imageID)
+	if err != nil {
+		return nil, err
+	}
+
+	var layers []model.ImageLayerInfo
+	for _, h := range history {
+		shortID := strings.TrimPrefix(h.ID, "sha256:")
+		if len(shortID) > 12 {
+			shortID = shortID[:12]
+		}
+		if shortID == "" || shortID == "<missing>" {
+			shortID = "layer"
+		}
+		createdBy := h.CreatedBy
+		createdBy = strings.TrimPrefix(createdBy, "/bin/sh -c #(nop) ")
+		createdBy = strings.TrimPrefix(createdBy, "/bin/sh -c ")
+
+		layers = append(layers, model.ImageLayerInfo{
+			ID:        shortID,
+			CreatedBy: strings.TrimSpace(createdBy),
+			Size:      h.Size,
+			CreatedAt: time.Unix(h.Created, 0),
+			IsBloated: h.Size > 50*1024*1024,
+		})
+	}
+	return layers, nil
+}
+
+// Безопасная целевая очистка диска
+func (r *RealClient) Prune(ctx context.Context, target model.PruneTarget) (model.PruneResult, error) {
+	var cleaned int64
+	emptyFilters := filters.NewArgs()
+
+	switch target {
+	case model.PruneImages:
+		report, err := r.cli.ImagesPrune(ctx, emptyFilters)
+		if err != nil {
+			return model.PruneResult{Target: target, Err: err}, err
+		}
+		cleaned = int64(report.SpaceReclaimed)
+
+	case model.PruneContainers:
+		report, err := r.cli.ContainersPrune(ctx, emptyFilters)
+		if err != nil {
+			return model.PruneResult{Target: target, Err: err}, err
+		}
+		cleaned = int64(report.SpaceReclaimed)
+
+	case model.PruneVolumes:
+		report, err := r.cli.VolumesPrune(ctx, emptyFilters)
+		if err != nil {
+			return model.PruneResult{Target: target, Err: err}, err
+		}
+		cleaned = int64(report.SpaceReclaimed)
+
+	case model.PruneBuildCache:
+		report, err := r.cli.BuildCachePrune(ctx, types.BuildCachePruneOptions{})
+		if err != nil {
+			return model.PruneResult{Target: target, Err: err}, err
+		}
+		cleaned = int64(report.SpaceReclaimed)
+
+	case model.PruneAll:
+		ir, _ := r.cli.ImagesPrune(ctx, emptyFilters)
+		cr, _ := r.cli.ContainersPrune(ctx, emptyFilters)
+		vr, _ := r.cli.VolumesPrune(ctx, emptyFilters)
+		br, _ := r.cli.BuildCachePrune(ctx, types.BuildCachePruneOptions{})
+		if ir.SpaceReclaimed > 0 {
+			cleaned += int64(ir.SpaceReclaimed)
+		}
+		if cr.SpaceReclaimed > 0 {
+			cleaned += int64(cr.SpaceReclaimed)
+		}
+		if vr.SpaceReclaimed > 0 {
+			cleaned += int64(vr.SpaceReclaimed)
+		}
+		if br != nil && br.SpaceReclaimed > 0 {
+			cleaned += int64(br.SpaceReclaimed)
+		}
+	}
+
+	return model.PruneResult{
+		Target:       target,
+		SpaceCleaned: cleaned,
+	}, nil
 }

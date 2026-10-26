@@ -25,6 +25,7 @@ const (
 	ViewList ActiveView = iota
 	ViewLogs
 	ViewInspect
+	ViewDisk
 )
 
 // Режим сортировки контейнеров
@@ -45,6 +46,12 @@ type inspectDetailsMsg model.ContainerDetails
 type actionResultMsg model.ActionResult
 type logLineMsg string
 type statsUpdateMsg model.StatsUpdate
+type diskUsageMsg model.DiskUsageInfo
+type imageLayersMsg struct {
+	imageID string
+	layers  []model.ImageLayerInfo
+}
+type pruneResultMsg model.PruneResult
 type toastClearMsg struct{}
 type tickMsg time.Time
 type execFinishedMsg struct{ err error }
@@ -57,6 +64,7 @@ type Model struct {
 	listView    views.ContainersListView
 	logsView    views.LogsView
 	inspectView views.InspectView
+	diskView    views.DiskView
 	filterBar   views.FilterBar
 	modal       views.ConfirmationModal
 	help        views.HelpView
@@ -78,6 +86,7 @@ func New(service docker.Service) Model {
 		listView:    views.NewContainersListView(),
 		logsView:    views.NewLogsView(),
 		inspectView: views.NewInspectView(),
+		diskView:    views.NewDiskView(),
 		filterBar:   views.NewFilterBar(),
 		activeView:  ViewList,
 	}
@@ -161,6 +170,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		cmds = append(cmds, m.clearToastCmd(), m.loadContainersCmd(), m.loadDaemonInfoCmd())
 
+	case diskUsageMsg:
+		m.diskView.SetDiskUsage(model.DiskUsageInfo(msg))
+
+	case imageLayersMsg:
+		m.diskView.SetLayers(msg.imageID, msg.layers)
+
+	case pruneResultMsg:
+		if msg.Err != nil {
+			m.toast = fmt.Sprintf("✖ Ошибка очистки: %v", msg.Err)
+			m.toastIsErr = true
+		} else {
+			m.toast = fmt.Sprintf("✔ Успешно освобождено %s дискового пространства!", model.FormatBytes(msg.SpaceCleaned))
+			m.toastIsErr = false
+		}
+		cmds = append(cmds, m.clearToastCmd(), m.loadDiskUsageCmd(), m.loadContainersCmd(), m.loadDaemonInfoCmd())
+
 	case execFinishedMsg:
 		if msg.err != nil {
 			m.toast = fmt.Sprintf("✖ Ошибка шелла: %v", msg.err)
@@ -211,6 +236,55 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, cmd)
 			}
 			return m, tea.Batch(cmds...)
+		}
+
+		// Управление на экране аудита диска и образов (Disk & Layers View)
+		if m.activeView == ViewDisk {
+			switch key {
+			case "esc", "backspace":
+				if m.diskView.ShowLayers {
+					m.diskView.CloseLayers()
+					return m, nil
+				}
+				m.activeView = ViewList
+				m.recalcDimensions()
+				return m, nil
+			case "up", "k", "л":
+				m.diskView.MoveUp()
+				return m, nil
+			case "down", "j", "о":
+				m.diskView.MoveDown()
+				return m, nil
+			case "enter":
+				if img := m.diskView.GetSelectedImage(); img != nil {
+					return m, m.loadImageLayersCmd(img.ID)
+				}
+				return m, nil
+			case "1":
+				m.toast = "Запущена очистка неиспользуемых образов..."
+				m.toastIsErr = false
+				return m, tea.Batch(m.pruneCmd(model.PruneImages), m.clearToastCmd())
+			case "2":
+				m.toast = "Запущена очистка остановленных контейнеров..."
+				m.toastIsErr = false
+				return m, tea.Batch(m.pruneCmd(model.PruneContainers), m.clearToastCmd())
+			case "3":
+				m.toast = "Запущена очистка неиспользуемых томов..."
+				m.toastIsErr = false
+				return m, tea.Batch(m.pruneCmd(model.PruneVolumes), m.clearToastCmd())
+			case "4":
+				m.toast = "Запущена очистка кэша сборки (BuildKit cache)..."
+				m.toastIsErr = false
+				return m, tea.Batch(m.pruneCmd(model.PruneBuildCache), m.clearToastCmd())
+			case "a", "ф":
+				m.toast = "Запущена полная очистка освобождаемого места (Prune All)..."
+				m.toastIsErr = false
+				return m, tea.Batch(m.pruneCmd(model.PruneAll), m.clearToastCmd())
+			default:
+				var cmd tea.Cmd
+				m.diskView.Viewport, cmd = m.diskView.Viewport.Update(msg)
+				return m, cmd
+			}
 		}
 
 		// Управление на экране информации (Inspect)
@@ -531,6 +605,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, m.startLogsStreamCmd(c.ID, ""))
 			}
 
+		case "p", "з": // Аудит диска и образов (Disk & Layers View)
+			m.activeView = ViewDisk
+			m.recalcDimensions()
+			return m, m.loadDiskUsageCmd()
+
 		case "/", "ю": // Search
 			m.filterBar.Focus()
 
@@ -630,6 +709,8 @@ func (m Model) View() string {
 		mainContent = m.logsView.Render(true)
 	} else if m.activeView == ViewInspect {
 		mainContent = m.inspectView.Render(true)
+	} else if m.activeView == ViewDisk {
+		mainContent = m.diskView.Render(true)
 	} else {
 		filterView := m.filterBar.Render(m.width)
 		visible := m.getVisibleContainers()
@@ -648,6 +729,8 @@ func (m Model) View() string {
 		activeModeStr = "logs"
 	} else if m.activeView == ViewInspect {
 		activeModeStr = "inspect"
+	} else if m.activeView == ViewDisk {
+		activeModeStr = "disk"
 	}
 
 	helpContent := m.help.Render(activeModeStr, isFiltered, m.modal.Active, false)
@@ -687,6 +770,7 @@ func (m *Model) recalcDimensions() {
 	m.listView.Height = availHeight
 	m.logsView.Resize(m.width, availHeight)
 	m.inspectView.Resize(m.width, availHeight)
+	m.diskView.Resize(m.width, availHeight)
 }
 
 func (m *Model) getVisibleContainers() []model.ContainerInfo {
@@ -901,4 +985,40 @@ func (m *Model) clearToastCmd() tea.Cmd {
 	return tea.Tick(4*time.Second, func(time.Time) tea.Msg {
 		return toastClearMsg{}
 	})
+}
+
+func (m *Model) loadDiskUsageCmd() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		du, err := m.docker.GetDiskUsage(ctx)
+		if err != nil {
+			return actionResultMsg{Action: "disk_usage", Err: err}
+		}
+		return diskUsageMsg(du)
+	}
+}
+
+func (m *Model) loadImageLayersCmd(imageID string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		layers, err := m.docker.GetImageLayers(ctx, imageID)
+		if err != nil {
+			return actionResultMsg{Action: "image_layers", Err: err}
+		}
+		return imageLayersMsg{imageID: imageID, layers: layers}
+	}
+}
+
+func (m *Model) pruneCmd(target model.PruneTarget) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		res, err := m.docker.Prune(ctx, target)
+		if err != nil {
+			return pruneResultMsg{Target: target, Err: err}
+		}
+		return pruneResultMsg(res)
+	}
 }

@@ -436,3 +436,73 @@ func (m *MockClient) GetExecCommand(ctx context.Context, id string) (*exec.Cmd, 
 func (m *MockClient) IsDemo() bool {
 	return true
 }
+
+func (m *MockClient) GetDiskUsage(ctx context.Context) (model.DiskUsageInfo, error) {
+	time.Sleep(100 * time.Millisecond)
+	now := time.Now()
+
+	images := []model.ImageItem{
+		{ID: "img-golang", ShortID: "a1b2c3d4e5f6", Repository: "golang", Tag: "1.24-alpine", Size: 365 * 1024 * 1024, Created: now.Add(-48 * time.Hour)},
+		{ID: "img-postgres", ShortID: "b2c3d4e5f6a1", Repository: "postgres", Tag: "16-alpine", Size: 412 * 1024 * 1024, Created: now.Add(-72 * time.Hour)},
+		{ID: "img-python", ShortID: "c3d4e5f6a1b2", Repository: "python", Tag: "3.12-slim", Size: 520 * 1024 * 1024, Created: now.Add(-24 * time.Hour)},
+		{ID: "img-node", ShortID: "d4e5f6a1b2c3", Repository: "node", Tag: "20-alpine", Size: 180 * 1024 * 1024, Created: now.Add(-96 * time.Hour)},
+		{ID: "img-nginx", ShortID: "e5f6a1b2c3d4", Repository: "nginx", Tag: "alpine", Size: 42 * 1024 * 1024, Created: now.Add(-120 * time.Hour)},
+		{ID: "img-redis", ShortID: "f6a1b2c3d4e5", Repository: "redis", Tag: "7-alpine", Size: 38 * 1024 * 1024, Created: now.Add(-150 * time.Hour)},
+	}
+
+	totalImgSize := int64(1557 * 1024 * 1024)
+	return model.DiskUsageInfo{
+		ImagesTotalSize:       totalImgSize,
+		ImagesReclaimable:     480 * 1024 * 1024,
+		ImagesCount:           len(images),
+		ContainersTotalSize:   320 * 1024 * 1024,
+		ContainersReclaimable: 110 * 1024 * 1024,
+		ContainersCount:       len(m.containers),
+		VolumesTotalSize:      2150 * 1024 * 1024,
+		VolumesReclaimable:    850 * 1024 * 1024,
+		VolumesCount:          4,
+		BuildCacheTotalSize:   3400 * 1024 * 1024,
+		BuildCacheReclaimable: 3400 * 1024 * 1024,
+		TotalSize:             totalImgSize + (320+2150+3400)*1024*1024,
+		TotalReclaimable:      (480 + 110 + 850 + 3400) * 1024 * 1024,
+		ImagesList:            images,
+	}, nil
+}
+
+func (m *MockClient) GetImageLayers(ctx context.Context, imageID string) ([]model.ImageLayerInfo, error) {
+	time.Sleep(80 * time.Millisecond)
+	now := time.Now()
+
+	return []model.ImageLayerInfo{
+		{ID: "layer-1", CreatedBy: "FROM alpine:3.20 (Base OS rootfs)", Size: 7 * 1024 * 1024, CreatedAt: now.Add(-72 * time.Hour)},
+		{ID: "layer-2", CreatedBy: "RUN apk add --no-cache ca-certificates tzdata git", Size: 18 * 1024 * 1024, CreatedAt: now.Add(-48 * time.Hour)},
+		{ID: "layer-3", CreatedBy: "WORKDIR /workspace", Size: 0, CreatedAt: now.Add(-24 * time.Hour)},
+		{ID: "layer-4", CreatedBy: "COPY go.mod go.sum ./", Size: 8 * 1024, CreatedAt: now.Add(-12 * time.Hour)},
+		{ID: "layer-5", CreatedBy: "RUN go mod download -x", Size: 145 * 1024 * 1024, CreatedAt: now.Add(-6 * time.Hour), IsBloated: true},
+		{ID: "layer-6", CreatedBy: "COPY . .", Size: 3 * 1024 * 1024, CreatedAt: now.Add(-2 * time.Hour)},
+		{ID: "layer-7", CreatedBy: "RUN CGO_ENABLED=0 go build -ldflags=\"-s -w\" -o /bin/app", Size: 42 * 1024 * 1024, CreatedAt: now.Add(-1 * time.Hour)},
+	}, nil
+}
+
+func (m *MockClient) Prune(ctx context.Context, target model.PruneTarget) (model.PruneResult, error) {
+	time.Sleep(300 * time.Millisecond)
+
+	var reclaimed int64
+	switch target {
+	case model.PruneImages:
+		reclaimed = 480 * 1024 * 1024
+	case model.PruneContainers:
+		reclaimed = 110 * 1024 * 1024
+	case model.PruneVolumes:
+		reclaimed = 850 * 1024 * 1024
+	case model.PruneBuildCache:
+		reclaimed = 3400 * 1024 * 1024
+	case model.PruneAll:
+		reclaimed = (480 + 110 + 850 + 3400) * 1024 * 1024
+	}
+
+	return model.PruneResult{
+		Target:       target,
+		SpaceCleaned: reclaimed,
+	}, nil
+}

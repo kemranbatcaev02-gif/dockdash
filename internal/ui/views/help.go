@@ -44,12 +44,25 @@ func (h HelpView) Render(activeMode string, isFiltered bool, isModal bool, isSpl
 			{Key: "Esc", Desc: "Назад"},
 			{Key: "q", Desc: "Выход"},
 		}
+	} else if activeMode == "disk" {
+		bindings = []KeyBinding{
+			{Key: "Esc", Desc: "Назад"},
+			{Key: "↑/↓", Desc: "Выбор образа"},
+			{Key: "Enter", Desc: "Слои (dive)"},
+			{Key: "1", Desc: "Prune образы"},
+			{Key: "2", Desc: "Prune контейнеры"},
+			{Key: "3", Desc: "Prune тома"},
+			{Key: "4", Desc: "Prune кэш"},
+			{Key: "a", Desc: "Очистить всё"},
+			{Key: "q", Desc: "Выход"},
+		}
 	} else {
 		bindings = []KeyBinding{
 			{Key: "↑/↓", Desc: "Выбор"},
 			{Key: "Space", Desc: "Старт/Стоп"},
 			{Key: "x", Desc: "Шелл"},
 			{Key: "r", Desc: "Рестарт"},
+			{Key: "p", Desc: "Диск/Prune"},
 			{Key: "Tab", Desc: "Свернуть"},
 			{Key: "g", Desc: "Стек"},
 			{Key: "s", Desc: "Сортировка"},

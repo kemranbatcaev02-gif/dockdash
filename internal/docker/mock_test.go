@@ -143,3 +143,35 @@ func TestGetExecCommand(t *testing.T) {
 		t.Errorf("unexpected real exec command arguments: %v", realCmd.Args)
 	}
 }
+
+func TestMockDiskAndPrune(t *testing.T) {
+	ctx := context.Background()
+	mock := NewMockClient()
+
+	// 1. GetDiskUsage
+	du, err := mock.GetDiskUsage(ctx)
+	if err != nil {
+		t.Fatalf("mock.GetDiskUsage failed: %v", err)
+	}
+	if du.TotalReclaimable == 0 || len(du.ImagesList) == 0 {
+		t.Fatalf("expected non-zero reclaimable space and images, got %+v", du)
+	}
+
+	// 2. GetImageLayers
+	layers, err := mock.GetImageLayers(ctx, du.ImagesList[0].ID)
+	if err != nil {
+		t.Fatalf("mock.GetImageLayers failed: %v", err)
+	}
+	if len(layers) == 0 {
+		t.Fatalf("expected layers for image, got 0")
+	}
+
+	// 3. Prune
+	pruneRes, err := mock.Prune(ctx, model.PruneBuildCache)
+	if err != nil {
+		t.Fatalf("mock.Prune failed: %v", err)
+	}
+	if pruneRes.SpaceCleaned == 0 {
+		t.Fatalf("expected non-zero cleaned bytes for build cache")
+	}
+}
