@@ -13,7 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-const version = "1.0.0"
+const version = "2.0.0"
 
 func main() {
 	demoFlag := flag.Bool("demo", false, "Запуск в демо-режиме (без Docker)")
