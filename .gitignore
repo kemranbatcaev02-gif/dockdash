@@ -24,5 +24,14 @@ Thumbs.db
 *.swp
 *.swo
 
-# Local practice
+# Local practice and workspace projects
 практика-пайтон/
+AuraDesk/
+code-roaster/
+commit-gotchi/
+daily-dev-vault/
+git-heatmap-painter/
+pocketflow/
+profile_repo/
+viperlog/
+run.bat
